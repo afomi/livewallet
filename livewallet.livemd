@@ -1,0 +1,89 @@
+# LiveWallet
+
+```elixir
+Mix.install(
+  [
+    # to create bitcoinSV transactions, including keys and scripts
+    {:bsv, "~> 2.1"},
+    # making http requests
+    {:httpoison, "~> 1.8"},
+    # to work with JSON
+    {:jason, "~> 1.3"},
+    # to work with Handcash.io's API
+    {:handkit, "~> 0.2.0"},
+    # to work with bitcoinSV miners
+    {:manic, "~> 0.1.0"},
+    # to generate qr codes
+    {:qr_code, "~> 3.0.0"},
+    # to add functionality to Livebook
+    {:kino, "~> 0.12.2"}
+  ],
+  config: [
+    bsv: [network: :test]
+    # bsv: [network: :main]
+  ]
+)
+```
+
+## Display which network we're using
+
+Whether we use the `main` or `test` network is up to us, and we configure that in the config section of the Setup above.
+
+```elixir
+BSV.network()
+```
+
+## Get started with seed words
+
+When using a blockchain, a user signs transactions using keys typically managed by Wallet software.
+
+We can create a Wallet from a Mnemonic phrase, which is a set of words, often referred to as "12 words".
+
+Generate these words randomly, and ensure the words are written down clearly and accurately.
+
+Your `mnemonic` or `seed phrase` is necessary to restore a wallet.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Run this code to generate 12 - 24 words, based on what you decide.
+
+```elixir
+# 12 words
+mnemonic = BSV.Mnemonic.new(128)
+# mnemonic = BSV.Mnemonic.new(160) # 15 words
+# mnemonic = BSV.Mnemonic.new(192) # 18 words
+# mnemonic = BSV.Mnemonic.new(224) # 21 words
+# mnemonic = BSV.Mnemonic.new(256) # 24 words
+```
+
+```elixir
+# enter the mnemonic you generate here, to save it going forward.
+# this is how you deterministically create a new wallet
+
+# BE SURE TO WRITE IT DOWN AND KEEP IT SAFE!
+mnemonic = "ENTER YOUR MNEMONIC HERE"
+```
+
+## Create a Seed
+
+The random words from the mnemonic seed phrase can be used to generate a Seed. This seed is a crucial part of deterministic wallet generation and is used to generate all the cryptographic keys associated with a wallet.
+
+```elixir
+seed = BSV.Mnemonic.to_seed(mnemonic)
+```
+
+Here, we create an Extended Key from a seed. This Extended Key can be used to create other keys, and so on.
+
+> In bitcoin, an important security consideration involves whether or not to re-use addresses. For additional privacy, use brand new keys for each tranaction. Fortunately, its easy for computers to generate thousands, millions of keys, cheap and easily.
+
+```elixir
+extkey = BSV.ExtKey.from_seed!(seed)
+```
+
+## Export the Wallet as a WIF
+
+Here, we export the PrivKey to a WIF. WIF stands for "Wallet Interchange Format", and it is a common way to import/export basic wallet information.
+
+```elixir
+extkey.privkey |> BSV.PrivKey.to_wif()
+```
