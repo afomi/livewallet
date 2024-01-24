@@ -1,0 +1,226 @@
+# LiveWallet - Part 2 - Generate addresses
+
+```elixir
+Mix.install(
+  [
+    # to create bitcoinSV transactions, including keys and scripts
+    {:bsv, "~> 2.1"},
+    # making http requests
+    {:httpoison, "~> 1.8"},
+    # to work with JSON
+    {:jason, "~> 1.3"},
+    # to work with Handcash.io's API
+    {:handkit, "~> 0.2.0"},
+    # to work with bitcoinSV miners
+    {:manic, "~> 0.1.0"},
+    # to generate qr codes
+    {:qr_code, "~> 3.0.0"},
+    # to add functionality to Livebook
+    {:kino, "~> 0.12.2"}
+  ],
+  config: [
+    bsv: [
+      network: :main
+    ]
+  ]
+)
+```
+
+## Let's regenerate an Extended Key from a seed phrase
+
+Let's start with the **seed phrase** we generated in Part 1.
+
+> Note: a Wallet has at least one Extended Key from which to create many of the keys it will use. Here, we're going to re-generate our Extended Key from Part 1, then keep going.
+
+Paste the seed phrase into the `mnemonic` text field input below.
+
+```elixir
+mnemonic_input = Kino.Input.text("mnemonic")
+```
+
+```elixir
+mnemonic = Kino.Input.read(mnemonic_input)
+```
+
+```elixir
+seed = BSV.Mnemonic.to_seed(mnemonic)
+```
+
+```elixir
+extkey = BSV.ExtKey.from_seed!(seed)
+```
+
+Rather than using the seed phrase, you could use the exported `xprv` Extended Key from Part 1.
+
+```elixir
+# If you have an `xprv` file from Part 1, it can also be used to regenerate an Extended Key, similar to how a seed phrase can be used to regenerate an Extended Key.
+# extkey = BSV.ExtKey.from_string("xprv...")
+```
+
+At this point, we have re-generated an Extended Key from a seed phrase or by loading a `xprv`.
+
+We can use the Extended Key to generate many addresses.
+
+```elixir
+Kino.Input.checkbox("Have you re-generated an Extended Key?")
+```
+
+## Here, we regenerate a key from a WIF instead
+
+You can use the WIF (Wallet Import Format) from Part 1 to import a key.
+
+```elixir
+# Create an input you can paste the WIF into
+wif_input = Kino.Input.text("WIF")
+```
+
+```elixir
+wif = Kino.Input.read(wif_input)
+```
+
+```elixir
+{:ok, private_key} = BSV.PrivKey.from_wif(wif)
+```
+
+Generate a public key from the private key.
+
+```elixir
+public_key = private_key |> BSV.PubKey.from_privkey()
+```
+
+```elixir
+public_key |> BSV.Address.from_pubkey()
+```
+
+In this section, we started with a WIF, which can be used to recreate a Private Key.
+
+```elixir
+for i <- 0..9 do
+  path = "m/44'/236'/0'/#{i}'"
+  child = BSV.ExtKey.derive(extkey, path)
+  address = BSV.Address.from_pubkey(child.pubkey)
+  "#{path} = #{BSV.Address.to_string(address)}" |> IO.puts()
+end
+```
+
+A list of 10 addresses should be displayed. Select one of them to use for this exercise; to receive bitcoin at.
+
+```elixir
+address = "ADDRESS_GOES_HERE"
+```
+
+## Generate a QR code to scan
+
+```elixir
+{:ok, svg_content} =
+  address
+  |> QRCode.create(:high)
+  |> QRCode.render()
+
+File.write!("qr_code.svg", svg_content)
+# this `qr_code.svg` file is written tfo the root path of your Livebook installation
+```
+
+Display the `qr_code.svg` file we just generated.
+
+```elixir
+# And here, we read that file and display it in Livebook.
+content = File.read!("qr_code.svg")
+Kino.Image.new(content, :svg)
+```
+
+## Generating HD keys
+
+This diagram outlines the overall flow generating a wallet and HD (hierarchical deterministic) keys.
+
+<!-- livebook:{"break_markdown":true} -->
+
+```mermaid
+graph TD;
+
+  ComputerGeneratedRandomNumber-->MnemonicSeedPhrase-->Seed-->ExtendedKey-->DerivativeKeys-->|the general example|DerivativeKey;
+  DerivativeKey-->Keypair-->PrivateKey
+
+  DerivativeKeys-->|specific addresses...|m/44/0'/0'/1-->Keypair1--->Address1;
+  DerivativeKeys-->m/44/0'/0'/2-->Keypair2--->Address2;
+  DerivativeKeys-->m/44/0'/0'/3-->Keypair3--->Address3;
+  DerivativeKeys-->m/44/0'/0'/4-->Keypair4--->Address4;
+  DerivativeKeys-->m/99/1'/2'/3-->Keypair5--->Address5;
+
+
+  Keypair-->PublicKey
+  PublicKey-->|RIPEMD160|Address
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+`Address` is what users typically see and send bitcoin too.
+
+Sometimes, just the `Public Key` is used.
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Sending bitcoin, Receiving bitcoin
+
+A Sender creates a Transaction and selects to Address to send to.
+
+The Address is derived from a Public Key, which corresponds to a Private Key that the Receiver has.
+
+So, the Receiver can use the Private Key to unlock the Transaction that the Sender sent.
+
+<!-- livebook:{"break_markdown":true} -->
+
+<!-- Learn more at https://mermaid-js.github.io/mermaid -->
+
+```mermaid
+graph TD;
+  Sender-->Transaction-->Address;
+  Receiver-->|seeks to unlock|Transaction
+  PrivateKey-->|unlocks|Transaction
+  Address-->|is derived from |PublicKey-->|corresponds to |PrivateKey
+  Receiver-->|has|PrivateKey
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Seed phrases, WIFs, Keypairs, Private & Public Keys, and Addresses
+
+<!-- livebook:{"break_markdown":true} -->
+
+<!-- Learn more at https://mermaid-js.github.io/mermaid -->
+
+```mermaid
+graph TD;
+  WIF-->Keypair
+  SeedPhrase-->Seed-->HDKeys-->Keypair-->PrivateKey-->PublicKey-->Address;
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+Choose an address from above (any one), and note both the a) address and the b) derivation path below. The derivation path is required in order to generate the private key for the correct, corresponding public key.
+
+## To review
+
+We started with the a a) WIF or b) seed phrase for the wallet we created in Part 1.
+
+Based on that WIF, you can generate a keypair; a Private and Public Key.
+
+Or, based on a seed phrase, you can generate a "seed", and from that seed generated 10 keypairs in a row, at different derivation paths.
+
+<!-- livebook:{"break_markdown":true} -->
+
+At this point, you can generate an address. That address might be easier to scan as a QR code, so we did generated one.
+
+If your address is for `main` network, you will be able to receive bitcoin (BSV) at this address.
+
+The address created was derived from the Public Key, and the Public Key has a corresponding Private Key.
+
+After receiving bitcoin to the address, a transaction will exist on the bitcoin blockchain. This transaction has some amount of satoshis in it. You'll need the Private Key to sign that transaction and transfer it.
+
+<!-- livebook:{"break_markdown":true} -->
+
+This diagram conveys how you can generate an address from a a) seed phrase or b) WIF.
+
+<!-- livebook:{"break_markdown":true} -->
+
+> This is the end of Part 2. Read Part 3 - [Receiving bitcoin](./003-receive-bitcoin-at-an-address.livemd).
