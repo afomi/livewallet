@@ -124,4 +124,4 @@ Kino.Input.checkbox("I understand that I can lose access to my bitcoins if I los
 )
 ```
 
-> This is the end of Part 1. Read Part 2 - [Generating keys](./002-generating-keys.md).
+> This is the end of Part 1. Read Part 2 - [Generating keys](./002-generating-keys.livemd).
