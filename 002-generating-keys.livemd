@@ -105,6 +105,10 @@ end
 
 A list of 10 addresses should be displayed. Select one of them to use for this exercise; to receive bitcoin at.
 
+<!-- livebook:{"break_markdown":true} -->
+
+Choose an address from above (any one), and note both the a) address and the b) derivation path below. The derivation path is required in order to generate the private key for the correct, corresponding public key.
+
 ```elixir
 address = "ADDRESS_GOES_HERE"
 ```
@@ -195,10 +199,6 @@ graph TD;
   SeedPhrase-->Seed-->HDKeys-->Keypair-->PrivateKey-->PublicKey-->Address;
 ```
 
-<!-- livebook:{"break_markdown":true} -->
-
-Choose an address from above (any one), and note both the a) address and the b) derivation path below. The derivation path is required in order to generate the private key for the correct, corresponding public key.
-
 ## To review
 
 We started with the a a) WIF or b) seed phrase for the wallet we created in Part 1.
@@ -223,4 +223,8 @@ This diagram conveys how you can generate an address from a a) seed phrase or b)
 
 <!-- livebook:{"break_markdown":true} -->
 
-> This is the end of Part 2. Read Part 3 - [Receiving bitcoin](./003-receive-bitcoin-at-an-address.livemd).
+> This is the end of Part 2.
+
+Read Part 3 - [Receiving bitcoin at an Address](./003-receive-bitcoin-at-an-address.livemd)
+
+Read Part 1 - [Generate an Extended Key](./001-generate-seed-and-extended-key.livemd)
