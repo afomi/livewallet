@@ -1,4 +1,4 @@
-# LiveWallet
+# LiveWallet - Part 1
 
 ```elixir
 Mix.install(
@@ -13,14 +13,12 @@ Mix.install(
     {:handkit, "~> 0.2.0"},
     # to work with bitcoinSV miners
     {:manic, "~> 0.1.0"},
-    # to generate qr codes
-    {:qr_code, "~> 3.0.0"},
     # to add functionality to Livebook
     {:kino, "~> 0.12.2"}
   ],
   config: [
-    bsv: [network: :test]
-    # bsv: [network: :main]
+    # bsv: [network: :test]
+    bsv: [network: :main]
   ]
 )
 ```
@@ -61,7 +59,7 @@ mnemonic = BSV.Mnemonic.new(128)
 # this is how you deterministically create a new wallet
 
 # BE SURE TO WRITE IT DOWN AND KEEP IT SAFE!
-mnemonic = "ENTER YOUR MNEMONIC HERE"
+# mnemonic = "NOTE YOUR MNEMONIC HERE"
 ```
 
 ## Create a Seed
@@ -80,10 +78,50 @@ Here, we create an Extended Key from a seed. This Extended Key can be used to cr
 extkey = BSV.ExtKey.from_seed!(seed)
 ```
 
+```elixir
+extkey |> BSV.ExtKey.to_string()
+```
+
+The exported Extended Key should look something like `xprv...`
+
+This exported key can be used to recreate the Extended Key, so, it should be also kept secure.
+
 ## Export the Wallet as a WIF
 
-Here, we export the PrivKey to a WIF. WIF stands for "Wallet Interchange Format", and it is a common way to import/export basic wallet information.
+Here, we export the PrivKey to a WIF. WIF stands for "Wallet Import Format", and it is a common way to import/export basic wallet information.
 
 ```elixir
-extkey.privkey |> BSV.PrivKey.to_wif()
+wif = extkey.privkey |> BSV.PrivKey.to_wif()
 ```
+
+```elixir
+# Enter the generated WIF here
+# wif = "Enter the WIF you generate here"
+```
+
+At this point, you have created a crypto wallet.
+
+* randomly generated a seed phrase
+* converted the seed phrase into a Seed
+* exported a single key as a WIF (Wallet Interchange Format)
+
+<!-- livebook:{"break_markdown":true} -->
+
+Going forward, you will need your seed phrase, so be sure to write it down.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Did you write down your seed phrase clearly and permanently?
+
+This test wallet is small beans, but this wallet cannot be recovered without the seed phrase, and that's an important lesson to learn that is specific to crypto(graphy).
+
+```elixir
+Kino.Input.checkbox("I have written down my seed phrase")
+```
+
+```elixir
+Kino.Input.checkbox("I understand that I can lose access to my bitcoins if I lose my seed phrase.")
+)
+```
+
+> This is the end of Part 1. Read Part 2 - [Generating keys](./002-generating-keys.md).
