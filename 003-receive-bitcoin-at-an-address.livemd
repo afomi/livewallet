@@ -1,0 +1,58 @@
+# LiveWallet - Part 3 - Send bitcoin to your address
+
+```elixir
+Mix.install(
+  [
+    # to create bitcoinSV transactions, including keys and scripts
+    {:bsv, "~> 2.1"},
+    # making http requests
+    {:httpoison, "~> 1.8"},
+    # to work with JSON
+    {:jason, "~> 1.3"},
+    # to work with Handcash.io's API
+    {:handkit, "~> 0.2.0"},
+    # to work with bitcoinSV miners
+    {:manic, "~> 0.1.0"},
+    # to generate qr codes
+    {:qr_code, "~> 3.0.0"},
+    # to add functionality to Livebook
+    {:kino, "~> 0.12.2"}
+  ],
+  config: [
+    bsv: [
+      network: :main
+    ]
+  ]
+)
+```
+
+## Receiving bitcoin
+
+After Part 2, you should have a public address and perhaps a QR code of that address.
+
+Your public address is based on a Public Key, 
+and that Public Key has a corresponding Private Key.
+
+This step is about **receiving bitcoin at that address**, with the assumption that we'll use the Private Key when we decide to send or spend the bitcoin.
+
+<!-- livebook:{"break_markdown":true} -->
+
+At this point, you have an address and can receive bitcoin.
+
+##### How and where can I get bitcoin?
+
+* Do you have a friend who uses #bsv? Ask them to send a small amount to get started.
+* Buy a small amount of BSV from certain exchanges.
+* Chat with Ryan and hopefully we can work out a small amount.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Finding where to get BitcoinSV can be a bit tricky, but once that's done and some bitcoin is sent to the address (typically the person receives a confirmation message that the funds have been sent), we can see and verify the transaction on chain., which is Part 4.
+
+```elixir
+Kino.Input.checkbox("Has bitcoin been sent to the address?")
+```
+
+Once bitcoin has been sent to your address, proceed to [Part 4 - See your transaction on a bitcoin block explorer](./004-view-transactions-with-block-explorer.livemd).
+
+If you got stuck or have any questions, please feel free to [create an Issue](https://github.com/afomi/livewallet/issues).
