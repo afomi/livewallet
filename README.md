@@ -10,6 +10,8 @@ that will control some bitcoin.
 
 ---
 
-LiveWallet is experimental software. Use at your own risk.
+LiveWallet is experimental software, intended for educational purposes. Use at your own risk.
 
-[Feedback welcome](./issues/new)
+[![](https://github.com/afomi/livewallet-site/blob/main/assets/images/livewallet-screenshot.png?raw=true)](https://www.livewallet.app)
+
+[🔁 Feedback welcome](./issues/new)
