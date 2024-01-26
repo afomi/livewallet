@@ -1,0 +1,26 @@
+# LiveWallet - Intro & Overview
+
+## Table of Contents
+
+This 5 part tutorial may take 1-2 hours to complete, if you're new to programming.
+If you're familiar with [Livebook](https://livebook.dev), this might take 30 minutes.
+
+Along the way, you'll
+learn about Bitcoin
+and write Elixir code within the developer-friendly Livebook application,
+and you will:
+
+1. receive some bitcoin
+1. compose a bitcoin transaction to send some bitcoin (and data if you want)
+1. (cryptographically) sign a bitcoin transaction with a Private Key
+1. send bitcoin by broadcasting a transaction
+
+> ⚠️ During this tutorial, you will receive and send **real bitcoin**. Please keep the amount of bitcoin small (fraction of U.S cents), as LiveWallet is primarily for educational purposes, and is not designed to be a full-time wallet; several wallet alternatives are more secure and better supported. Bitcoin received during this tutorial is typically transferrable to other wallets.
+
+<!-- livebook:{"break_markdown":true} -->
+
+* Part 1 - Create a new crypto Wallet using a Mnemonic phrase
+* Part 2 - Generate addresses using HD keys
+* Part 3 - Send bitcoin to your newly created address
+* Part 4 - See your transaction on a bitcoin block explorer
+* Part 5 - Create a transaction, sign it, and broadcast to the blockchain
