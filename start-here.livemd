@@ -1,0 +1,225 @@
+# LiveWallet: Start Here
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Find your way around LiveWallet and choose a network, so that every other notebook just works.
+
+The cell above is the standard setup block.
+Every tutorial notebook starts with the same one, so opening any notebook on its own works.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## What this is
+
+**Learn bitcoin by *using* bitcoin.**
+
+You make a wallet, receive some bitcoin, look it up, and send it on, all in small steps you can read and run yourself.
+
+Each notebook focuses on one concept.
+Each ends with a Review cell that prints `PASS` when it worked, 
+and leaves you with something real you can point at: 
+an address, a transaction, a message written on the blockchain.
+
+Every notebook works on its own.
+Open any one, run it from the top, and it works.
+The "Before this" line at the top of each notebook says what to do first, and the map below draws those as arrows.
+
+> ⚠️ On mainnet you receive and send **real bitcoin**.
+> Keep it small, under 1 USD.
+> LiveWallet is for learning; it is not a wallet to keep money in.
+
+## Choose a network once
+
+Every notebook starts on **testnet**, where the coins have no value.
+That is the safe place to learn, and nothing you do there can cost you money.
+
+When you are ready for real bitcoin, switch on purpose.
+Livebook has secrets, in the padlock icon in the sidebar.
+Add one named `LB_NETWORK` with the value `main`.
+Every notebook reads it in the setup cell and shows the banner you saw above, which turns to **MAINNET** so you cannot miss it.
+Remove the secret, or set it to `test`, to go back.
+
+Mainnet and testnet do not mix.
+An `xprv` becomes a `tprv`, addresses start with `1` instead of `m` or `n`, and an address from one network is rejected on the other.
+If you switch, regenerate from your seed phrase.
+
+## The map
+
+Solid arrows are the path for a first sitting.
+Dotted arrows are optional depth.
+Dashed boxes are planned and not yet written.
+
+```mermaid
+flowchart TD
+  SH[start-here]
+
+  subgraph wallet
+    W1[wallet/seed-and-wallet]
+    W2[wallet/keys-and-addresses]
+    W3[wallet/mnemonic-and-derivation]
+    W4[wallet/key-hierarchy]
+  end
+
+  subgraph transactions
+    T1[transactions/receive]
+    T2[transactions/verify-on-chain]
+    T3[transactions/send]
+    T4[transactions/order-lock]
+  end
+
+  subgraph tools
+    U1[tools/address-balance-viewer]
+    U2[tools/ml-on-chain-data]
+  end
+
+  subgraph governance
+    G1[governance/multisig-ceremony]
+    G2[governance/serverless-wallet]
+  end
+
+  subgraph tokens
+    K1[tokens/script-envelopes]
+    K2[tokens/inscribe]
+    K3[tokens/recover-ordinals]
+    K4[tokens/transfer-and-burn]
+    K5[tokens/recover-twetch-posts]
+    K6[tokens/post-to-twetch-protocol]
+    K7[tokens/recover-relayx-jigs]
+    K8[tokens/provenance-tokens]
+  end
+
+  SH --> W1 --> W2 --> T1 --> T2 --> T3
+  W2 -.-> W3
+  W3 -.-> W4
+  T2 -.-> U1
+  T3 --> T4
+  T3 --> G1
+  W3 --> G1
+  T3 --> G2
+  T4 -.-> U2
+  T3 --> K1 --> K2
+  W3 --> K3
+  K2 --> K4
+  K3 --> K4
+  K3 --> K5 --> K6
+  K3 --> K7
+  K2 --> K7
+  T3 --> K8
+
+  classDef planned stroke-dasharray: 5 5
+  class K1,K2,K3,K4,K5,K6,K7,K8 planned
+```
+
+## Three ways in
+
+**New to bitcoin.**
+You want to see how it works, in one sitting.
+Follow the solid path: five notebooks, one to two hours if programming is new to you, thirty minutes if you know Livebook.
+You need a tiny amount of bitcoin for the last three.
+
+**Building something.**
+You want pieces you can reuse: make keys, build a transaction, sign it, send it, read one back.
+Do the solid path once, then branch into order-lock, governance, and tokens.
+
+**Holding old keys.**
+You have a seed phrase from a wallet or an app that is gone, and want to see and move what it still holds.
+Start with wallet/mnemonic-and-derivation, then the tokens/recover notebooks as they arrive.
+
+## Every notebook
+
+The full list, one line each, is in the [table of contents](table-of-contents.livemd).
+
+## The pieces
+
+Every notebook introduces a few new words and builds on earlier ones.
+The full list, with where each is explained, is in [docs/CONCEPTS.md](docs/CONCEPTS.md).
+This is how the pieces fit together:
+
+```mermaid
+erDiagram
+  MNEMONIC ||--|| SEED : "PBKDF2, optional passphrase"
+  SEED ||--|| EXTENDED_KEY : "HMAC-SHA512"
+  EXTENDED_KEY ||--o{ KEY : "derives at a path"
+  KEY ||--|| ADDRESS : "HASH160 of public key"
+  ADDRESS ||--o{ OUTPUT : "locking script names"
+  TRANSACTION ||--|{ OUTPUT : "creates"
+  TRANSACTION ||--|{ INPUT : "has"
+  INPUT ||--|| OUTPUT : "spends an earlier"
+  KEY ||--o{ INPUT : "signs"
+  BLOCK ||--o{ TRANSACTION : "confirms"
+
+  KEY {
+    bytes private_key "secret"
+    bytes public_key "shareable"
+    string path "m/44'/236'/0'/0/i"
+  }
+  OUTPUT {
+    int satoshis
+    script locking_script "P2PKH, OP_RETURN, envelope"
+    bool unspent "a UTXO while true"
+  }
+  INPUT {
+    outpoint previous "txid and output index"
+    script unlocking_script "signature and public key"
+    int sequence
+  }
+  TRANSACTION {
+    hash txid "double SHA256 of the bytes"
+    int lock_time
+  }
+```
+
+## What you will learn
+
+* Wallets do not hold coins; they hold keys.
+* One seed phrase generates unlimited keys, deterministically.
+* An address is a hash of a public key, not the key itself.
+* A transaction is inputs that unlock earlier outputs, and outputs that lock value to new scripts.
+* The fee is whatever the outputs do not claim.
+* Anyone can verify any transaction, and you did.
+
+## Related
+
+* [Bitcoin: An Introduction](../bitcoin-book/), the companion book that covers the why.
+* [Bitcoin whitepaper](https://bitcoin.org/bitcoin.pdf), nine pages.
+* [Livebook](https://livebook.dev) and [bsv-ex](https://github.com/libitx/bsv-ex).
+
+## Next
+
+[Seed and Wallet](wallet/seed-and-wallet.livemd).
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).

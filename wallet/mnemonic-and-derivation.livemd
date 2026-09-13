@@ -1,0 +1,227 @@
+# Mnemonic and Derivation
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Generate a mnemonic, optionally protect it with a passphrase, and derive twenty addresses two ways, so that you understand hardened paths and watch-only keys.
+
+Before this: [Keys and Addresses](./keys-and-addresses.livemd).
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## Choose mnemonic strength and passphrase
+
+```elixir
+strength_input =
+  Kino.Input.select("Mnemonic length", [
+    {128, "12 words (128 bits of entropy)"},
+    {256, "24 words (256 bits of entropy)"}
+  ])
+
+passphrase_input = Kino.Input.password("Optional passphrase (the BIP39 salt, sometimes called the 25th word)")
+existing_input = Kino.Input.textarea("Or paste an existing seed phrase (leave blank to generate)")
+
+Kino.Layout.grid([strength_input, passphrase_input, existing_input], columns: 1)
+```
+
+## Generate the mnemonic and the seed
+
+```elixir
+strength = Kino.Input.read(strength_input)
+passphrase = Kino.Input.read(passphrase_input) || ""
+
+mnemonic =
+  case String.trim(Kino.Input.read(existing_input)) do
+    "" -> BSV.Mnemonic.new(strength)
+    pasted -> pasted
+  end
+
+seed = BSV.Mnemonic.to_seed(mnemonic, passphrase: passphrase)
+mnemonic
+```
+
+> ⚠️ A different passphrase produces a completely different seed from the same words.
+> There is no wrong passphrase; every passphrase yields a valid wallet.
+> Lose the passphrase, lose the funds.
+
+## Derive the master extended key
+
+```elixir
+master_xprv = BSV.ExtKey.from_seed!(seed)
+master_xpub = BSV.ExtKey.to_public(master_xprv)
+BSV.ExtKey.to_string(master_xpub)
+```
+
+## The standard BSV path: `m/44'/236'/0'/0/i`
+
+This is the conventional derivation.
+The account level, `0'`, is hardened; that is the security boundary.
+The change level, `0`, and the address index, `i`, are not hardened, so the account xpub alone can derive every address.
+
+```mermaid
+flowchart TD
+  M[master xprv] -->|"44'"| P[purpose]
+  P -->|"236'"| C[coin: BSV]
+  C -->|"0'"| A["account 0 (hardened boundary)"]
+  A -->|neuter| AX[account xpub, watch-only]
+  A -->|0| E[external chain]
+  E -->|i| K[address i]
+  AX -.->|can derive| K
+```
+
+```elixir
+account_xprv = BSV.ExtKey.derive(master_xprv, "m/44'/236'/0'")
+account_xpub = BSV.ExtKey.to_public(account_xprv)
+BSV.ExtKey.to_string(account_xpub)
+```
+
+```elixir
+bip44_addresses =
+  for i <- 0..19 do
+    child = BSV.ExtKey.derive(account_xprv, "m/0/#{i}")
+    address = child.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+    %{index: i, path: "m/44'/236'/0'/0/#{i}", address: address}
+  end
+
+Kino.DataTable.new(bip44_addresses, name: "BIP44 receive addresses")
+```
+
+The account xpub is the watch-only handle.
+Give it to a balance tracker or an auditor; they can derive all twenty addresses and more, but cannot spend.
+Prove it: derive the same addresses from the xpub alone.
+
+```elixir
+from_xpub =
+  for i <- 0..19 do
+    child = BSV.ExtKey.derive(account_xpub, "m/0/#{i}")
+    child.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+  end
+
+from_xpub == Enum.map(bip44_addresses, & &1.address)
+```
+
+## Alternative: twenty fully hardened addresses
+
+Every level hardened, including the address index.
+There is no shared xpub that derives all twenty; each address is its own island.
+Useful when you want maximum isolation between addresses and accept that watch-only tracking needs a separate xpub per address.
+
+```elixir
+hardened_addresses =
+  for i <- 0..19 do
+    path = "m/44'/236'/0'/0'/#{i}'"
+    child = BSV.ExtKey.derive(master_xprv, path)
+    address = child.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+    %{index: i, path: path, address: address}
+  end
+
+Kino.DataTable.new(hardened_addresses, name: "Fully hardened addresses")
+```
+
+Try deriving a hardened child from the account xpub and watch it fail.
+
+```elixir
+try do
+  BSV.ExtKey.derive(account_xpub, "m/0'/0")
+  "Unexpected: derived a hardened child from an xpub"
+rescue
+  e -> "As expected, an xpub cannot derive hardened children: #{Exception.message(e)}"
+end
+```
+
+## Privacy: why twenty addresses?
+
+From the [bitcoin whitepaper](https://bitcoin.org/bitcoin.pdf), section 10:
+
+> The necessity to announce all transactions publicly precludes [the banking privacy model], but privacy can still be maintained by breaking the flow of information in another place: by keeping public keys anonymous.
+> As an additional firewall, a new key pair should be used for each transaction to keep them from being linked to a common owner.
+> Some linking is still unavoidable with multi-input transactions, which necessarily reveal that their inputs were owned by the same owner.
+
+Two things follow.
+
+**A fresh address per payment.**
+The twenty BIP44 addresses exist so you can hand out a different one each time without managing twenty backups.
+The account xpub generates them on demand, forever, from the one mnemonic you wrote down once.
+Reusing one address collapses the anonymity Satoshi describes.
+
+**The multi-input caveat.**
+The moment you spend from address 0 and address 3 together in one transaction, a chain analyst can cluster them under one owner.
+The twenty addresses are only as unlinked as your spending discipline.
+Coin selection is a privacy decision, not just a fee decision.
+
+> Hardened-per-address does not give more on-chain privacy than BIP44.
+> The chain does not know how you derived a key.
+> Hardening protects against xpub leakage, not against linkage from co-spending.
+
+## When to use which
+
+| Use case | Path style |
+|---|---|
+| Personal wallet; a phone or dashboard shows the balance | BIP44, unhardened leaves |
+| Merchant generating fresh deposit addresses on a hot server | BIP44; the server holds only the xpub |
+| Each address is a separate cold-storage vault | Fully hardened |
+| Air-gapped signer plus online watcher | BIP44; online has the xpub, offline has the xprv |
+| No cross-address linkability even if an xpub leaks | Fully hardened |
+
+## Review
+
+You generated a mnemonic, optionally salted it, derived a master key, and produced twenty addresses two ways: the watch-only-friendly BIP44 layout, and the fully isolated hardened layout.
+The mnemonic and passphrase are the only things to back up; everything below them is reproducible.
+
+```elixir
+checks = [
+  {"mnemonic has 12, 15, 18, 21 or 24 words", length(String.split(mnemonic)) in [12, 15, 18, 21, 24]},
+  {"xpub derives the same 20 addresses as the xprv", from_xpub == Enum.map(bip44_addresses, & &1.address)},
+  {"hardened and BIP44 address sets do not overlap",
+   MapSet.disjoint?(
+     MapSet.new(bip44_addresses, & &1.address),
+     MapSet.new(hardened_addresses, & &1.address)
+   )}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+## Next
+
+* [Key Hierarchy](./key-hierarchy.livemd): diagrams of what each layer of key can and cannot do, and the air-gap model.
+* Use one of these addresses in [Receive Bitcoin](../transactions/receive.livemd).
+* Spend from one in [Send a Transaction](../transactions/send.livemd).
+* Hand the xpub to [Address Balance Viewer](../tools/address-balance-viewer.livemd).
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).

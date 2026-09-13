@@ -1,0 +1,167 @@
+# Seed and Wallet
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Generate a seed phrase and turn it into a wallet, so that you hold a key that nothing else can recreate.
+
+Before this: [Start here](../start-here.livemd).
+This is the first notebook on the path; nothing else is required.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## Seed words
+
+When using a blockchain, a user signs transactions with keys that are usually managed by wallet software.
+A wallet can be created from a mnemonic phrase, a set of random words often called "12 words".
+
+Your mnemonic is the only thing needed to restore the wallet.
+Write it down clearly and keep it safe.
+
+```mermaid
+flowchart LR
+  R[random bits] -->|BIP39 wordlist| M[mnemonic phrase]
+  M -->|PBKDF2| S[seed]
+  S -->|HMAC-SHA512| X[extended key]
+  X -->|export| W[WIF]
+```
+
+Run this cell to generate a fresh mnemonic.
+Change the number of bits for a longer phrase.
+
+```elixir
+# 128 bits gives 12 words. 160, 192, 224 and 256 bits give 15, 18, 21 and 24 words.
+generated_mnemonic = BSV.Mnemonic.new(128)
+```
+
+Every time you evaluate the cell above, you get a different mnemonic phrase.
+To pin one, paste it into the box below.
+Leave the box blank to use the phrase you just generated.
+
+```elixir
+mnemonic_input =
+  Kino.Input.textarea("Seed phrase to reuse (leave blank to use the one generated above)")
+```
+
+```elixir
+mnemonic =
+  case String.trim(Kino.Input.read(mnemonic_input)) do
+    "" -> generated_mnemonic
+    pasted -> pasted
+  end
+```
+
+## Create a seed
+
+The words are turned into a seed.
+The seed is the root from which every key in this wallet grows.
+
+```elixir
+seed = BSV.Mnemonic.to_seed(mnemonic)
+```
+
+From the seed we create an extended key.
+An extended key can derive further keys, and those can derive more.
+
+> In bitcoin, an important privacy consideration is whether to reuse addresses.
+> For better privacy, use a fresh key for each transaction.
+> Computers generate keys cheaply, so there is no reason to be stingy.
+
+```elixir
+extkey = BSV.ExtKey.from_seed!(seed)
+```
+
+```elixir
+BSV.ExtKey.to_string(extkey)
+```
+
+On mainnet the exported extended key starts with `xprv`.
+On testnet it starts with `tprv`.
+This string recreates the extended key, so it must be kept as secret as the seed phrase.
+
+## Export the wallet as a WIF
+
+WIF stands for Wallet Import Format.
+It is a common way to move a single private key between wallets.
+
+```elixir
+wif = BSV.PrivKey.to_wif(extkey.privkey)
+```
+
+## Review
+
+You have created a wallet:
+
+* generated a seed phrase
+* converted the seed phrase into a seed
+* derived an extended key from the seed
+* exported the root private key as a WIF
+
+Going forward, you need only the seed phrase.
+This wallet cannot be recovered without it, and that lesson is specific to cryptography.
+
+Did you write the seed phrase down clearly and permanently?
+
+```elixir
+Kino.Input.checkbox("I have written down my seed phrase")
+```
+
+The cell below checks what you built.
+It prints PASS, or raises with the failing check.
+
+```elixir
+words = String.split(mnemonic)
+prefix = if network == :main, do: "xprv", else: "tprv"
+
+checks = [
+  {"mnemonic has 12, 15, 18, 21 or 24 words", length(words) in [12, 15, 18, 21, 24]},
+  {"extended key starts with #{prefix} on #{network}",
+   String.starts_with?(BSV.ExtKey.to_string(extkey), prefix)},
+  {"WIF round-trips to the same private key", BSV.PrivKey.from_wif(wif) == {:ok, extkey.privkey}}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+Keep for later: your seed phrase (on paper), and nothing else.
+
+## Next
+
+[Keys and Addresses](./keys-and-addresses.livemd): derive many keys from this one seed and make one of them reachable.
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).
