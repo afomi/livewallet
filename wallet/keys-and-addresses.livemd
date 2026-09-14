@@ -75,7 +75,7 @@ The apostrophe marks a hardened step, which you will meet again in [Mnemonic and
 
 ```mermaid
 flowchart TD
-  M[mnemonic] --> S[seed] --> X[extended key]
+  M[seed phrase] --> S[seed] --> X[extended key]
   X --> D0["m/44'/236'/0'/0/0"] --> K0[keypair 0] --> A0[address 0]
   X --> D1["m/44'/236'/0'/0/1"] --> K1[keypair 1] --> A1[address 1]
   X --> Dn["m/44'/236'/0'/0/n"] --> Kn[keypair n] --> An[address n]

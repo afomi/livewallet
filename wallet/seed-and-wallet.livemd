@@ -50,20 +50,23 @@ Kino.Markdown.new("""
 ## Seed words
 
 When using a blockchain, a user signs transactions with keys that are usually managed by wallet software.
-A wallet can be created from a mnemonic phrase, a set of random words often called "12 words".
+A wallet can be created from a seed phrase, a set of random words often called "12 words".
+The BIP39 standard that defines it calls the phrase a mnemonic, and so does the code below.
 
-Your mnemonic is the only thing needed to restore the wallet.
+Your seed phrase is the only thing needed to restore the wallet.
 Write it down clearly and keep it safe.
+Holding it yourself makes this wallet non-custodial.
+A custodial wallet is one where a company holds the keys for you.
 
 ```mermaid
 flowchart LR
-  R[random bits] -->|BIP39 wordlist| M[mnemonic phrase]
+  R[random bits] -->|BIP39 wordlist| M[seed phrase]
   M -->|PBKDF2| S[seed]
   S -->|HMAC-SHA512| X[extended key]
   X -->|export| W[WIF]
 ```
 
-Run this cell to generate a fresh mnemonic.
+Run this cell to generate a fresh seed phrase.
 Change the number of bits for a longer phrase.
 
 ```elixir
@@ -71,7 +74,7 @@ Change the number of bits for a longer phrase.
 generated_mnemonic = BSV.Mnemonic.new(128)
 ```
 
-Every time you evaluate the cell above, you get a different mnemonic phrase.
+Every time you evaluate the cell above, you get a different seed phrase.
 To pin one, paste it into the box below.
 Leave the box blank to use the phrase you just generated.
 
@@ -151,7 +154,7 @@ words = String.split(mnemonic)
 prefix = if network == :main, do: "xprv", else: "tprv"
 
 checks = [
-  {"mnemonic has 12, 15, 18, 21 or 24 words", length(words) in [12, 15, 18, 21, 24]},
+  {"seed phrase has 12, 15, 18, 21 or 24 words", length(words) in [12, 15, 18, 21, 24]},
   {"extended key starts with #{prefix} on #{network}",
    String.starts_with?(BSV.ExtKey.to_string(extkey), prefix)},
   {"WIF round-trips to the same private key", BSV.PrivKey.from_wif(wif) == {:ok, extkey.privkey}}

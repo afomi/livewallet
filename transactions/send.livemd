@@ -52,7 +52,7 @@ Kino.Markdown.new("""
 A transaction consumes unspent outputs and creates new ones.
 Each input points at an earlier output and carries an unlocking script, which for a normal payment is a signature and a public key.
 Each output carries a value and a locking script, which for a normal payment names an address.
-Whatever value the inputs carry that the outputs do not claim goes to the miner as the fee.
+Whatever value the inputs carry that the outputs do not claim is the miner fee, and the miner keeps it.
 
 ```mermaid
 sequenceDiagram
@@ -166,7 +166,7 @@ It says: whoever can present a public key hashing to this value, and a signature
 Three outputs:
 
 1. the payment, locked to the address you are paying
-2. a memo, in an OP_RETURN output that carries data and can never be spent
+2. a memo, a short note of your own, in an OP_RETURN output that carries data and can never be spent
 3. change, back to your own address, so the fee is not the whole remainder
 
 The fee is implicit.

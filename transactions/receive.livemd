@@ -54,6 +54,8 @@ That public key has a corresponding private key, which only you hold.
 
 Anyone can send bitcoin to the address.
 Only the private key can spend what arrives.
+What arrives is counted in satoshis, the smallest unit of bitcoin.
+One bitcoin is 100,000,000 satoshis, and this tutorial moves a few thousand.
 
 ```mermaid
 flowchart LR

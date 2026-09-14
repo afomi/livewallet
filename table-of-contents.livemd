@@ -39,4 +39,4 @@ See `PLAN.md` for the order they will land in.
 ## Reference
 
 * [Concepts](docs/CONCEPTS.md): every word the notebooks use, and where each is explained.
-* [Bitcoin: An Introduction](../bitcoin-book/), the companion book that covers the why.
+* [Bitcoin: An Introduction](https://livewallet.app/bitcoin-book), the companion book that covers the why.

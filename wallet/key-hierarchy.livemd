@@ -2,7 +2,7 @@
 
 ## Setup
 
-> Read how a mnemonic becomes a signing key, and what each layer can and cannot do, so that you know which things must stay secret and which are safe to share.
+> Read how a seed phrase, the mnemonic, becomes a signing key, and what each layer can and cannot do, so that you know which things must stay secret and which are safe to share.
 
 Before this: [Mnemonic and Derivation](./mnemonic-and-derivation.livemd).
 This notebook is diagrams and prose only; there is nothing to evaluate.
