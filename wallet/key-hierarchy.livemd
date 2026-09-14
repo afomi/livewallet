@@ -16,7 +16,7 @@ flowchart TD
     S[seed<br/>512 bits]
     XPRV[master xprv<br/>privkey + chain code]
     XPUB[master xpub<br/>pubkey + chain code]
-    CXPRV[child xprv<br/>at m/44'/0'/0'/0/0]
+    CXPRV[child xprv<br/>at m/44'/236'/0'/0/0]
     CXPUB[child xpub]
     PRIV[private key<br/>256 bits]
     PUB[public key<br/>secp256k1 point]
@@ -49,10 +49,10 @@ Red = must stay secret. Green = safe to share.
 ```mermaid
 flowchart LR
     Master[master xprv]
-    Acct[account xprv<br/>m/44'/0'/0']
+    Acct[account xprv<br/>m/44'/236'/0']
     AcctPub[account xpub]
-    Recv0[receive key 0<br/>m/44'/0'/0'/0/0]
-    Recv1[receive key 1<br/>m/44'/0'/0'/0/1]
+    Recv0[receive key 0<br/>m/44'/236'/0'/0/0]
+    Recv1[receive key 1<br/>m/44'/236'/0'/0/1]
     Sig0[sign for addr 0]
     Sig1[sign for addr 1]
     Watch[watch-only wallet<br/>sees balances<br/>cannot sign]

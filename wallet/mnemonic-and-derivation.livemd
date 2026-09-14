@@ -16,6 +16,10 @@ network =
     other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
   end
 
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
 Application.put_env(:bsv, :network, network)
 ```
 
@@ -122,11 +126,14 @@ Kino.DataTable.new(bip44_addresses, name: "BIP44 receive addresses")
 The account xpub is the watch-only handle.
 Give it to a balance tracker or an auditor; they can derive all twenty addresses and more, but cannot spend.
 Prove it: derive the same addresses from the xpub alone.
+The path starts with a capital `M` this time.
+In bsv-ex a lowercase `m` means private derivation, and an xpub has no private key to derive from, so `m/0/0` on an xpub raises.
+`M/0/0` asks for public derivation, which is the only kind an xpub can do.
 
 ```elixir
 from_xpub =
   for i <- 0..19 do
-    child = BSV.ExtKey.derive(account_xpub, "m/0/#{i}")
+    child = BSV.ExtKey.derive(account_xpub, "M/0/#{i}")
     child.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
   end
 
@@ -155,7 +162,7 @@ Try deriving a hardened child from the account xpub and watch it fail.
 
 ```elixir
 try do
-  BSV.ExtKey.derive(account_xpub, "m/0'/0")
+  BSV.ExtKey.derive(account_xpub, "M/0'/0")
   "Unexpected: derived a hardened child from an xpub"
 rescue
   e -> "As expected, an xpub cannot derive hardened children: #{Exception.message(e)}"
