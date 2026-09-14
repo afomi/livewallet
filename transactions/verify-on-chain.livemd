@@ -1,0 +1,167 @@
+# Verify On-Chain
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Look up the transaction that paid you and read its inputs and outputs, so that you trust the ledger because you checked it.
+
+Before this: [Receive Bitcoin](./receive.livemd).
+You need the txid and the address from that notebook.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## Look up the transaction by its id
+
+Every transaction has an id, the txid.
+A wallet app usually links the txid to a block explorer website.
+Here you make the same request the website makes.
+
+```mermaid
+sequenceDiagram
+  participant You as Livebook
+  participant API as WhatsOnChain API
+  participant Node as bitcoin node
+  You->>API: GET /tx/hash/txid
+  API->>Node: getrawtransaction
+  Node-->>API: transaction
+  API-->>You: JSON with vin, vout, blockheight
+```
+
+```elixir
+txid_input = Kino.Input.text("txid from Receive Bitcoin")
+address_input = Kino.Input.text("Your address")
+Kino.Layout.grid([txid_input, address_input], columns: 1)
+```
+
+```elixir
+txid = String.trim(Kino.Input.read(txid_input))
+address = String.trim(Kino.Input.read(address_input))
+tx_url = "#{woc}/tx/hash/#{txid}"
+```
+
+Make the request, take the body, and decode the JSON.
+
+```elixir
+%{status_code: 200, body: body} = HTTPoison.get!(tx_url)
+tx = Jason.decode!(body)
+```
+
+A `MatchError` above means the API did not return 200.
+Check the txid, and check that the network banner matches the network the transaction is on.
+
+## Read the structure
+
+A transaction has inputs, `vin`, and outputs, `vout`.
+Inputs point at earlier outputs and unlock them.
+Outputs lock value to a new script, usually one that names an address.
+
+```elixir
+%{
+  "txid" => tx["txid"],
+  "inputs" => length(tx["vin"]),
+  "outputs" => length(tx["vout"]),
+  "size_bytes" => tx["size"],
+  "locktime" => tx["locktime"],
+  "blockheight" => Map.get(tx, "blockheight", "not yet mined"),
+  "confirmations" => Map.get(tx, "confirmations", 0)
+}
+```
+
+Zero confirmations means the transaction is in the mempool, accepted by nodes but not yet in a block.
+Blocks arrive roughly every ten minutes.
+For small payments, a transaction that nodes have accepted is already useful.
+
+Here are the outputs.
+One of them should be locked to your address.
+
+```elixir
+outputs =
+  for out <- tx["vout"] do
+    %{
+      n: out["n"],
+      value_bsv: out["value"],
+      address: out["scriptPubKey"]["addresses"] |> List.wrap() |> Enum.join(", ")
+    }
+  end
+
+Kino.DataTable.new(outputs, name: "Outputs")
+```
+
+This is close to what a bitcoin node itself returns.
+WhatsOnChain adds convenience endpoints on top, such as the unspent-output list you used before.
+
+## Your unspent outputs
+
+An unspent transaction output, or UTXO, is an output no later transaction has consumed.
+Your balance is the sum of the UTXOs locked to your keys.
+There is no account and no balance field anywhere on the chain; only outputs.
+
+```elixir
+%{status_code: 200, body: body} = HTTPoison.get!("#{woc}/address/#{address}/unspent")
+utxos = Jason.decode!(body)
+Kino.DataTable.new(utxos, name: "Unspent outputs for #{address}")
+```
+
+## Review
+
+You fetched a transaction by id, read its inputs and outputs, found the output that pays you, and listed the UTXOs your address controls.
+
+```elixir
+checks = [
+  {"API returned the transaction you asked for", tx["txid"] == txid},
+  {"one of its outputs is locked to your address", Enum.any?(outputs, &(&1.address == address))},
+  {"that transaction appears in your unspent outputs", Enum.any?(utxos, &(&1["tx_hash"] == txid))}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+If the last check fails but the first two pass, you may have already spent that output.
+That is fine; the next notebook works from whatever is unspent.
+
+Keep for later: the address, its index, and your seed phrase.
+
+## Next
+
+[Send a Transaction](./send.livemd): spend that output by building, signing and broadcasting a transaction yourself.
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).

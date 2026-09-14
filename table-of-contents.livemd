@@ -1,0 +1,42 @@
+# LiveWallet: Table of Contents
+
+## Every notebook
+
+Each notebook works on its own and says at the top what to do before it.
+The [start page](start-here.livemd) has a map that draws those as arrows, and explains how to choose a network.
+
+Livebook also lists the sections of whichever notebook is open in its left sidebar.
+
+## wallet
+
+* [Seed and Wallet](wallet/seed-and-wallet.livemd): generate a seed phrase and turn it into a wallet.
+* [Keys and Addresses](wallet/keys-and-addresses.livemd): derive many keys from one seed and make one reachable.
+* [Mnemonic and Derivation](wallet/mnemonic-and-derivation.livemd): passphrases, hardened paths, watch-only keys.
+* [Key Hierarchy](wallet/key-hierarchy.livemd): diagrams of what each layer of key can and cannot do.
+
+## transactions
+
+* [Receive Bitcoin](transactions/receive.livemd): watch value arrive at an address you control.
+* [Verify On-Chain](transactions/verify-on-chain.livemd): read a transaction's inputs and outputs from the API.
+* [Send a Transaction](transactions/send.livemd): build, sign and broadcast by hand.
+* [Order Lock](transactions/order-lock.livemd): a transaction that cannot be mined until a chosen block height.
+
+## tools
+
+* [Address Balance Viewer](tools/address-balance-viewer.livemd): watch many addresses at once.
+* [ML on Chain Data](tools/ml-on-chain-data.livemd): a machine-learning smart cell, to be pointed at on-chain text.
+
+## governance
+
+* [Multisig Ceremony](governance/multisig-ceremony.livemd): two of three keys, held by three people, spend together.
+* [Serverless Wallet](governance/serverless-wallet.livemd): a wallet shaped like a function.
+
+## tokens (planned)
+
+Create, read, transfer and burn, applied to inscriptions, on-chain posts, and assets held by old keys.
+See `PLAN.md` for the order they will land in.
+
+## Reference
+
+* [Concepts](docs/CONCEPTS.md): every word the notebooks use, and where each is explained.
+* [Bitcoin: An Introduction](https://livewallet.app/bitcoin-book), the companion book that covers the why.

@@ -1,0 +1,140 @@
+# Key Hierarchy
+
+## Setup
+
+> Read how a seed phrase, the mnemonic, becomes a signing key, and what each layer can and cannot do, so that you know which things must stay secret and which are safe to share.
+
+Before this: [Mnemonic and Derivation](./mnemonic-and-derivation.livemd).
+This notebook is diagrams and prose only; there is nothing to evaluate.
+
+## The chain of derivations
+
+```mermaid
+flowchart TD
+    M[mnemonic<br/>12 or 24 words<br/>BIP39 wordlist]
+    P[optional passphrase<br/>'25th word']
+    S[seed<br/>512 bits]
+    XPRV[master xprv<br/>privkey + chain code]
+    XPUB[master xpub<br/>pubkey + chain code]
+    CXPRV[child xprv<br/>at m/44'/236'/0'/0/0]
+    CXPUB[child xpub]
+    PRIV[private key<br/>256 bits]
+    PUB[public key<br/>secp256k1 point]
+    ADDR[address<br/>Base58Check of HASH160 pubkey]
+    SIG[signature<br/>over a tx hash]
+
+    M -->|PBKDF2| S
+    P -.->|salt| S
+    S -->|HMAC-SHA512<br/>'Bitcoin seed'| XPRV
+    XPRV -->|neuter| XPUB
+    XPRV -->|CKDpriv<br/>BIP32| CXPRV
+    XPUB -->|CKDpub<br/>non-hardened only| CXPUB
+    CXPRV -->|strip chain code| PRIV
+    CXPRV -->|neuter| CXPUB
+    PRIV -->|secp256k1 mult| PUB
+    CXPUB -->|extract| PUB
+    PUB -->|HASH160 + encode| ADDR
+    PRIV -->|ECDSA sign| SIG
+
+    classDef secret fill:#fdd,stroke:#900,color:#000
+    classDef public fill:#dfd,stroke:#090,color:#000
+    class M,P,S,XPRV,CXPRV,PRIV,SIG secret
+    class XPUB,CXPUB,PUB,ADDR public
+```
+
+Red = must stay secret. Green = safe to share.
+
+## Who can sign for what
+
+```mermaid
+flowchart LR
+    Master[master xprv]
+    Acct[account xprv<br/>m/44'/236'/0']
+    AcctPub[account xpub]
+    Recv0[receive key 0<br/>m/44'/236'/0'/0/0]
+    Recv1[receive key 1<br/>m/44'/236'/0'/0/1]
+    Sig0[sign for addr 0]
+    Sig1[sign for addr 1]
+    Watch[watch-only wallet<br/>sees balances<br/>cannot sign]
+
+    Master -->|derive| Acct
+    Acct -->|derive| Recv0
+    Acct -->|derive| Recv1
+    Acct -->|neuter| AcctPub
+    Recv0 -->|sign| Sig0
+    Recv1 -->|sign| Sig1
+    AcctPub -->|derive pubkeys only| Watch
+```
+
+Key rules:
+
+* **A key signs only for itself.** A parent never signs *as* a child; it derives the child's private key first, then that child signs.
+* **Holding an xprv = holding every descendant privkey.** Compromise propagates downward.
+* **xpub gives away every child address but no signing power.** This is the watch-only pattern.
+* **Hardened derivation** (path segments with `'`) breaks the xpub→child-pubkey shortcut. Hardened children require the *private* parent. BIP44 hardens at the account level so leaking one account's xpub doesn't expose siblings.
+
+## The air-gap model: what actually crosses between worlds
+
+A common confusion: "if the xprv lives on an air-gapped machine, how does it *do* anything?" The answer is that the xprv never leaves — only **xpubs** (going out) and **unsigned / signed transactions** (crossing both ways) move between the air-gapped world and the online world.
+
+```mermaid
+flowchart LR
+    subgraph AIRGAP[AIR-GAPPED / COLD]
+        M[mnemonic<br/>on paper or metal]
+        XPRV[xprv<br/>in memory only]
+        SIGN[sign operation]
+        M -->|load| XPRV
+        XPRV --> SIGN
+    end
+
+    subgraph ONLINE[ONLINE / HOT]
+        XPUB[xpub<br/>public repo]
+        UTXO[UTXO fetch<br/>from chain]
+        BUILD[build unsigned tx]
+        BCAST[broadcast]
+        XPUB --> BUILD
+        UTXO --> BUILD
+    end
+
+    XPRV -. "export once<br/>(QR / USB / typed)" .-> XPUB
+    BUILD -. "unsigned tx<br/>crosses in" .-> SIGN
+    SIGN -. "signed tx<br/>crosses out" .-> BCAST
+
+    classDef cold fill:#fdd,stroke:#900,color:#000
+    classDef hot fill:#dfd,stroke:#090,color:#000
+    class M,XPRV,SIGN cold
+    class XPUB,UTXO,BUILD,BCAST hot
+```
+
+The dotted arrows are physical crossings — a QR scan, a USB stick, a hand-typed string, or a hardware-wallet USB cable. They are deliberately slow and deliberately narrow.
+
+Key properties:
+
+- **The xpub crosses out once.** At wallet setup. After that it lives freely in the online world — committed to repos, loaded into phone wallets, handed to auditors.
+- **Transactions cross twice per spend.** Unsigned in, signed out. The signer sees only the transaction it is asked to sign; it learns nothing about the rest of the chain.
+- **The xprv never crosses.** Not in encrypted form, not in "just this once" form, not via cloud sync. If the xprv has ever touched an online machine, treat it as compromised and rotate.
+
+A **hardware wallet** (Ledger, Trezor, Coldcard) is this diagram in a pocket-sized box: the red box is the secure element, the dotted arrows are the USB cable and the on-device screen. The design is identical; only the form factor differs.
+
+For multisig, the same diagram applies *per signer* — each member has their own cold box, each crosses only their own pubkey and their own partial signature. There is no single cold box holding "the" key because there is no "the" key.
+
+## Practical separation for LiveWallet
+
+| Layer          | Where it should live                                  | Why                                     |
+| -------------- | ----------------------------------------------------- | --------------------------------------- |
+| mnemonic       | offline backup (paper, metal)                         | recovery only; never in a notebook cell |
+| seed           | derived on demand from mnemonic                       | no need to persist separately           |
+| master xprv    | keystore file (`~/.livewallet/keys.json`), never repo | sensitive; derives everything           |
+| account xprv   | same keystore, optionally separate entries            | scoped blast radius                     |
+| child privkey  | derived in-memory at signing time                     | never written to disk                   |
+| xpub / address | safe to log, share, screenshot                        | public by design                        |
+
+The tutorial notebooks accept a mnemonic, and where it makes sense a WIF, as entry points and derive downward from whichever you supplied.
+A learner who only has a WIF (a single private key, with no derivation possible upward) can still use the notebooks that need a single key.
+Nothing in this repo writes a key to disk; that is a deliberate choice, and the table above is why.
+
+## Next
+
+* [Multisig Ceremony](../governance/multisig-ceremony.livemd): the air-gap model, applied per signer.
+* [Serverless Wallet](../governance/serverless-wallet.livemd): scoping an xprv to one account for a hot function.
+* Back to the [map](../start-here.livemd).

@@ -1,0 +1,158 @@
+# Receive Bitcoin
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Receive bitcoin at an address you derived yourself, so that you can see value arrive at a key you control.
+
+Before this: [Keys and Addresses](../wallet/keys-and-addresses.livemd).
+You need the address and its index from that notebook.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## Your address is a destination
+
+Your address is derived from a public key.
+That public key has a corresponding private key, which only you hold.
+
+Anyone can send bitcoin to the address.
+Only the private key can spend what arrives.
+What arrives is counted in satoshis, the smallest unit of bitcoin.
+One bitcoin is 100,000,000 satoshis, and this tutorial moves a few thousand.
+
+```mermaid
+flowchart LR
+  S[sender's wallet] -->|transaction| N[bitcoin network]
+  N -->|output locked to your address| U[UTXO]
+  K[your private key] -.->|can unlock later| U
+```
+
+```elixir
+address_input = Kino.Input.text("Your address from Keys and Addresses")
+```
+
+```elixir
+address = String.trim(Kino.Input.read(address_input))
+{:ok, _} = BSV.Address.from_string(address)
+address
+```
+
+A `MatchError` above means the address is not valid for the `#{network}` network.
+Mainnet addresses start with `1`; testnet addresses start with `m` or `n`.
+
+## How and where to get bitcoin
+
+```elixir
+Kino.Markdown.new(
+  case network do
+    :main ->
+      """
+      You are on **mainnet**, so this is real bitcoin.
+      Keep it small: less than 1 USD is plenty for the whole tutorial.
+
+      * Ask a friend who uses BSV to send a small amount to your address.
+      * Buy a small amount from an exchange that supports BSV withdrawals, and withdraw to your address.
+      * Use a BSV wallet app you already have, and send from it to your address.
+      """
+
+    :test ->
+      """
+      You are on **testnet**, so the coins have no value.
+
+      * Search for a "BSV testnet faucet" and paste your address into it.
+      * Faucets come and go; if one is down, try another.
+      * If none work, switch `LB_NETWORK` to `main` and use a few real satoshis instead.
+      """
+  end
+)
+```
+
+Once you have sent bitcoin to the address, the sending wallet usually shows a confirmation.
+Now prove it from your side.
+
+## Watch the value arrive
+
+The WhatsOnChain API lists the unspent outputs locked to an address.
+Re-evaluate this cell until it shows at least one.
+
+```elixir
+%{status_code: 200, body: body} = HTTPoison.get!("#{woc}/address/#{address}/unspent")
+utxos = Jason.decode!(body)
+
+case utxos do
+  [] ->
+    "Nothing yet. Send bitcoin to #{address}, wait a few seconds, and re-evaluate this cell."
+
+  [first | _] ->
+    """
+    Received.
+    txid:     #{first["tx_hash"]}
+    output:   #{first["tx_pos"]}
+    value:    #{first["value"]} satoshis
+    height:   #{first["height"]} (0 means still in the mempool)
+    """
+end
+```
+
+The `tx_hash` is the transaction id, or txid.
+Copy it; you will look it up in the next notebook.
+
+## Review
+
+You shared an address, someone sent bitcoin to it, and you saw the unspent output appear from the API.
+
+```elixir
+checks = [
+  {"address is valid on #{network}", match?({:ok, _}, BSV.Address.from_string(address))},
+  {"at least one unspent output is locked to the address", utxos != []}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+Keep for later: the address, its index, and the txid.
+
+## Next
+
+[Verify On-Chain](./verify-on-chain.livemd): look the transaction up and read its structure.
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).

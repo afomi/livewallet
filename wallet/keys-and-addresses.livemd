@@ -1,0 +1,210 @@
+# Keys and Addresses
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Derive many keys from one seed and turn one of them into an address, so that you have somewhere real to receive bitcoin.
+
+Before this: [Seed and Wallet](./seed-and-wallet.livemd).
+You need the seed phrase from that notebook.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## Regenerate the extended key from the seed phrase
+
+A wallet has at least one extended key from which it derives the keys it uses.
+Here you rebuild the extended key from the seed phrase, then keep going.
+
+```elixir
+mnemonic_input = Kino.Input.textarea("Seed phrase from Seed and Wallet")
+```
+
+```elixir
+mnemonic = String.trim(Kino.Input.read(mnemonic_input))
+seed = BSV.Mnemonic.to_seed(mnemonic)
+extkey = BSV.ExtKey.from_seed!(seed)
+BSV.ExtKey.to_string(extkey)
+```
+
+The string should match the one you exported last time.
+Same words, same seed, same key, every time; that is what deterministic means.
+
+## Derive keys at paths
+
+One extended key derives a tree of children.
+A derivation path names one child.
+The path `m/44'/236'/0'/0/i` is the convention for BSV: purpose 44, coin type 236, account 0, external chain 0, address index `i`.
+The apostrophe marks a hardened step, which you will meet again in [Mnemonic and Derivation](./mnemonic-and-derivation.livemd).
+
+```mermaid
+flowchart TD
+  M[seed phrase] --> S[seed] --> X[extended key]
+  X --> D0["m/44'/236'/0'/0/0"] --> K0[keypair 0] --> A0[address 0]
+  X --> D1["m/44'/236'/0'/0/1"] --> K1[keypair 1] --> A1[address 1]
+  X --> Dn["m/44'/236'/0'/0/n"] --> Kn[keypair n] --> An[address n]
+```
+
+Derive the first ten.
+
+```elixir
+addresses =
+  for i <- 0..9 do
+    path = "m/44'/236'/0'/0/#{i}"
+    child = BSV.ExtKey.derive(extkey, path)
+    address = child.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+    %{index: i, path: path, address: address}
+  end
+
+Kino.DataTable.new(addresses, name: "Ten addresses from one seed")
+```
+
+Only addresses are shown.
+The private keys exist in memory and are never printed; you do not need to see them to use them.
+
+## Choose one address
+
+Pick an index.
+You will receive bitcoin at this address, and later you will need the same index to spend from it.
+
+```elixir
+index_input = Kino.Input.number("Address index to use", default: 0)
+```
+
+```elixir
+index = Kino.Input.read(index_input) || 0
+path = "m/44'/236'/0'/0/#{index}"
+child = BSV.ExtKey.derive(extkey, path)
+address = child.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+```
+
+Write down the address and the index.
+
+## From public key to address
+
+An address is not a key.
+It is a hash of the public key, encoded so that a typo is caught by a checksum.
+
+```mermaid
+flowchart LR
+  P[private key] -->|secp256k1| Q[public key]
+  Q -->|SHA256 then RIPEMD160| H[public key hash]
+  H -->|network byte and Base58Check| A[address]
+```
+
+```elixir
+%{
+  public_key_hex: BSV.PubKey.to_binary(child.pubkey, encoding: :hex),
+  public_key_hash_hex: Base.encode16(BSV.Address.from_pubkey(child.pubkey).pubkey_hash, case: :lower),
+  address: address
+}
+```
+
+## A QR code to scan
+
+```elixir
+{:ok, svg} = address |> QRCode.create(:high) |> QRCode.render()
+Kino.Image.new(svg, :svg)
+```
+
+## The other way in: a single key from a WIF
+
+A WIF holds one private key, not a tree.
+The WIF you exported in Seed and Wallet is the root key, so its address is not one of the ten above.
+Paste it to see that a single key still yields an address.
+Leave it blank to skip.
+
+```elixir
+wif_input = Kino.Input.text("WIF from Seed and Wallet (optional)")
+```
+
+```elixir
+case String.trim(Kino.Input.read(wif_input)) do
+  "" ->
+    "No WIF pasted. Skipping."
+
+  wif ->
+    {:ok, privkey} = BSV.PrivKey.from_wif(wif)
+    privkey |> BSV.PubKey.from_privkey() |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+end
+```
+
+## Sending and receiving, in one picture
+
+A sender builds a transaction that locks value to your address.
+Your private key is what unlocks it later.
+
+```mermaid
+flowchart LR
+  S[sender] -->|builds| T[transaction]
+  T -->|locks value to| A[address]
+  A -->|derived from| Q[public key]
+  Q -->|corresponds to| P[private key]
+  R[you] -->|hold| P
+  P -->|unlocks| T
+```
+
+## Review
+
+You rebuilt the extended key from the seed phrase, derived ten addresses, chose one, and rendered it as a QR code.
+
+```elixir
+expected_prefixes = if network == :main, do: ["1"], else: ["m", "n"]
+rederived = BSV.ExtKey.derive(extkey, path).pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+
+checks = [
+  {"address decodes on #{network}", match?({:ok, _}, BSV.Address.from_string(address))},
+  {"address has the #{network} prefix", String.first(address) in expected_prefixes},
+  {"address re-derives from the seed at #{path}", rederived == address}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+Keep for later: the address, its index, and your seed phrase.
+
+## Next
+
+[Receive Bitcoin](../transactions/receive.livemd): send a small amount to the address and watch it arrive.
+
+Or go deeper first: [Mnemonic and Derivation](./mnemonic-and-derivation.livemd) explains passphrases, hardened paths and watch-only keys.
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).
