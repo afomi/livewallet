@@ -16,6 +16,10 @@ network =
     other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
   end
 
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
 Application.put_env(:bsv, :network, network)
 ```
 
@@ -72,6 +76,10 @@ Livebook has secrets, in the padlock icon in the sidebar.
 Add one named `LB_NETWORK` with the value `main`.
 Every notebook reads it in the setup cell and shows the banner you saw above, which turns to **MAINNET** so you cannot miss it.
 Remove the secret, or set it to `test`, to go back.
+
+A LiveWallet that someone else hosts for you, such as `try.livewallet.app`, is testnet only.
+The setup cell refuses mainnet there, on purpose.
+A real wallet belongs on a Livebook you run yourself.
 
 Mainnet and testnet do not mix.
 An `xprv` becomes a `tprv`, addresses start with `1` instead of `m` or `n`, and an address from one network is rejected on the other.
@@ -171,7 +179,7 @@ This is how the pieces fit together:
 
 ```mermaid
 erDiagram
-  MNEMONIC ||--|| SEED : "PBKDF2, optional passphrase"
+  SEED_PHRASE ||--|| SEED : "PBKDF2, optional passphrase"
   SEED ||--|| EXTENDED_KEY : "HMAC-SHA512"
   EXTENDED_KEY ||--o{ KEY : "derives at a path"
   KEY ||--|| ADDRESS : "HASH160 of public key"
@@ -214,7 +222,7 @@ erDiagram
 
 ## Related
 
-* [Bitcoin: An Introduction](../bitcoin-book/), the companion book that covers the why.
+* [Bitcoin: An Introduction](https://livewallet.app/bitcoin-book), the companion book that covers the why.
 * [Bitcoin whitepaper](https://bitcoin.org/bitcoin.pdf), nine pages.
 * [Livebook](https://livebook.dev) and [bsv-ex](https://github.com/libitx/bsv-ex).
 
