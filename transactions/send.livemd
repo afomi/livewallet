@@ -1,0 +1,311 @@
+# Send a Transaction
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Build a transaction by hand, sign it with your key, and broadcast it, so that you know money moves because of a signature and nothing else.
+
+Before this: [Verify On-Chain](./verify-on-chain.livemd) and [Keys and Addresses](../wallet/keys-and-addresses.livemd).
+You need your seed phrase, the funded address, and its index.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## What a transaction is
+
+A transaction consumes unspent outputs and creates new ones.
+Each input points at an earlier output and carries an unlocking script, which for a normal payment is a signature and a public key.
+Each output carries a value and a locking script, which for a normal payment names an address.
+Whatever value the inputs carry that the outputs do not claim goes to the miner as the fee.
+
+```mermaid
+sequenceDiagram
+  participant K as your private key
+  participant L as Livebook
+  participant A as WhatsOnChain API
+  participant N as network
+  L->>A: which outputs does my address hold?
+  A-->>L: UTXO list
+  L->>L: build inputs and outputs
+  K->>L: sign each input
+  L->>A: POST raw transaction
+  A->>N: relay
+  N-->>A: accepted, txid
+  A-->>L: txid
+```
+
+## Inputs from you
+
+The address to pay can be any address on your network.
+A second address of your own from [Keys and Addresses](../wallet/keys-and-addresses.livemd) works, and you can watch it arrive.
+On mainnet, the Next section at the end offers one more destination for this first transaction.
+
+```elixir
+address_input = Kino.Input.text("Your funded address")
+index_input = Kino.Input.number("Its address index", default: 0)
+mnemonic_input = Kino.Input.password("Your seed phrase")
+target_input = Kino.Input.text("Address to pay")
+amount_input = Kino.Input.number("Satoshis to pay", default: 1000)
+memo_input = Kino.Input.text("Memo to write on chain", default: "hello from livewallet")
+
+Kino.Layout.grid(
+  [address_input, index_input, mnemonic_input, target_input, amount_input, memo_input],
+  columns: 1
+)
+```
+
+## Derive the key that controls the address
+
+The key must be the one the address was derived from.
+The first thing to check is that they match.
+If they do not, nothing further can work.
+
+```elixir
+address = String.trim(Kino.Input.read(address_input))
+index = Kino.Input.read(index_input) || raise("Enter the address index from Keys and Addresses")
+mnemonic = String.trim(Kino.Input.read(mnemonic_input))
+path = "m/44'/236'/0'/0/#{index}"
+
+keypair =
+  mnemonic
+  |> BSV.Mnemonic.to_seed()
+  |> BSV.ExtKey.from_seed!()
+  |> BSV.ExtKey.derive(path)
+
+derived = keypair.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+
+if derived != address do
+  raise "The key at #{path} controls #{derived}, not #{address}. Check the seed phrase and the index."
+end
+
+"The key at #{path} controls #{address}."
+```
+
+## Find an output to spend
+
+```elixir
+%{status_code: 200, body: body} = HTTPoison.get!("#{woc}/address/#{address}/unspent")
+utxos = Jason.decode!(body)
+
+if utxos == [], do: raise("No unspent outputs at #{address}. Go back to Receive Bitcoin.")
+
+%{"tx_hash" => utxo_txid, "tx_pos" => vout, "value" => value} = Enum.max_by(utxos, & &1["value"])
+"Spending output #{vout} of #{utxo_txid}, worth #{value} satoshis"
+```
+
+To spend an output you need its locking script.
+Fetch the raw transaction that created it and read the output from there.
+This also lets you check that hashing the raw bytes gives the txid the API told you.
+
+```elixir
+%{status_code: 200, body: rawhex} = HTTPoison.get!("#{woc}/tx/#{utxo_txid}/hex")
+prev_tx = BSV.Tx.from_binary!(rawhex, encoding: :hex)
+
+if BSV.Tx.get_txid(prev_tx) != utxo_txid do
+  raise "Hashing the raw transaction does not give #{utxo_txid}"
+end
+
+prev_out = Enum.at(prev_tx.outputs, vout)
+
+if prev_out.satoshis != value do
+  raise "The output holds #{prev_out.satoshis} satoshis but the API said #{value}"
+end
+
+{:ok, utxo} =
+  BSV.UTXO.from_params(%{
+    "txid" => utxo_txid,
+    "vout" => vout,
+    "satoshis" => prev_out.satoshis,
+    "script" => BSV.Script.to_binary(prev_out.script, encoding: :hex)
+  })
+
+prev_out.script
+```
+
+The script above is P2PKH, pay to public key hash.
+It says: whoever can present a public key hashing to this value, and a signature from its private key, may spend this output.
+
+## Build the transaction
+
+Three outputs:
+
+1. the payment, locked to the address you are paying
+2. a memo, in an OP_RETURN output that carries data and can never be spent
+3. change, back to your own address, so the fee is not the whole remainder
+
+The fee is implicit.
+It is the input value minus the value of all outputs.
+
+```elixir
+{:ok, target_address} = BSV.Address.from_string(String.trim(Kino.Input.read(target_input)))
+amount = Kino.Input.read(amount_input) || raise("Enter an amount in satoshis")
+memo = Kino.Input.read(memo_input)
+
+builder =
+  %BSV.TxBuilder{
+    inputs: [
+      BSV.Contract.P2PKH.unlock(utxo, %{keypair: keypair})
+    ],
+    outputs: [
+      BSV.Contract.P2PKH.lock(amount, %{address: target_address}),
+      BSV.Contract.OpReturn.lock(0, %{data: [memo]})
+    ]
+  }
+  |> BSV.TxBuilder.change_to(address)
+
+fee = BSV.TxBuilder.calc_required_fee(builder)
+
+if amount + fee > value do
+  raise "The output holds #{value} satoshis; #{amount} plus a fee of about #{fee} does not fit"
+end
+
+"Paying #{amount} satoshis, fee about #{fee}, change about #{value - amount - fee} back to #{address}"
+```
+
+The fee estimate uses bsv-ex's default rate of 0.5 satoshis per byte.
+Miners publish their own rates, and most accept less; the rate is a policy, not a rule of the protocol.
+
+A `MatchError` on the first line means the address you are paying is not valid on `#{network}`.
+Mainnet and testnet addresses are not interchangeable.
+
+If the change would be tiny, the builder drops it and the miner keeps it.
+That is why the fee shown after signing can be a little higher than the estimate.
+
+## Sign
+
+Turning the builder into a transaction signs every input with the key you supplied.
+
+```elixir
+tx = BSV.TxBuilder.to_tx(builder)
+rawtx = BSV.Tx.to_binary(tx, encoding: :hex)
+txid = BSV.Tx.get_txid(tx)
+
+outputs_total = tx.outputs |> Enum.map(& &1.satoshis) |> Enum.sum()
+
+%{
+  txid: txid,
+  inputs: length(tx.inputs),
+  outputs: length(tx.outputs),
+  input_satoshis: value,
+  output_satoshis: outputs_total,
+  fee_satoshis: value - outputs_total,
+  size_bytes: div(byte_size(rawtx), 2)
+}
+```
+
+The txid exists before the network has seen the transaction.
+It is the hash of the bytes you just produced.
+
+## Broadcast
+
+```elixir
+broadcast_txid =
+  case HTTPoison.post!("#{woc}/tx/raw", Jason.encode!(%{txhex: rawtx}), [
+         {"content-type", "application/json"}
+       ]) do
+    %{status_code: code, body: body} when code in [200, 201] ->
+      String.trim(body, "\"")
+
+    %{status_code: code, body: body} ->
+      raise "Broadcast rejected (#{code}): #{body}"
+  end
+```
+
+If the API is down, paste `rawtx` into [whatsonchain.com/broadcast](https://whatsonchain.com/broadcast) instead.
+Then set `broadcast_txid = txid` by hand and continue.
+A `429` means WhatsOnChain is rate-limiting repeated evaluation; wait a minute and re-evaluate the one cell, not the whole notebook.
+
+Common rejections:
+
+* A message mentioning `OP_VERIFY` or `Signature must be zero for failed CHECKSIG`: the signature did not match the locking script, usually because the key or the index is wrong.
+* `txn-mempool-conflict` or `already known`: the output was already spent, possibly by an earlier evaluation of this notebook.
+* `insufficient priority` or `min relay fee not met`: outputs claim too much of the input; lower the amount.
+* `invalid_base58_check`: the target address belongs to the other network.
+
+## Review
+
+You found an unspent output, proved your key controls it, built a transaction with a payment, a memo and change, signed it, and the network accepted it.
+
+```elixir
+checks = [
+  {"derived address matches the funded address", derived == address},
+  {"the transaction spends the output you chose", hd(tx.inputs).outpoint == utxo.outpoint},
+  {"fee is positive", value - outputs_total > 0},
+  {"network returned the same txid you computed", broadcast_txid == txid}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+Open the result in a block explorer:
+
+```elixir
+host = if network == :main, do: "whatsonchain.com", else: "test.whatsonchain.com"
+Kino.Markdown.new("[#{txid}](https://#{host}/tx/#{txid})")
+```
+
+You have now done the whole loop: seed, key, address, receive, verify, send.
+Nothing carries forward; the loop is closed.
+
+## Next
+
+### Your first transaction can go here
+
+If you are on mainnet and want a destination for the transaction you just learned to build, this address belongs to the person who wrote LiveWallet:
+
+```
+1J12o2k964mJPTuS53Un7oJ2Hxo5ksYf4L
+```
+
+Put it in the address input above, write whatever you like in the memo, and run the notebook again.
+The memo stays on chain, and the messages people leave show up at [livewallet.app](https://livewallet.app).
+A few thousand satoshis is plenty; the point is the transaction, not the amount.
+On testnet this address is rejected, which is the network check from [Start Here](../start-here.livemd) doing its job.
+
+### Pick a direction
+
+Pick a direction from the [map](../start-here.livemd):
+
+* [Order Lock](./order-lock.livemd): a transaction that cannot be mined until a chosen block height.
+* [Address Balance Viewer](../tools/address-balance-viewer.livemd): watch many addresses at once.
+* [Multisig Ceremony](../governance/multisig-ceremony.livemd): spend with two of three keys held by different people.
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).

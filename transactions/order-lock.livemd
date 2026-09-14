@@ -1,0 +1,238 @@
+# Order Lock
+
+```elixir
+Mix.install([
+  {:bsv, "~> 2.1"},
+  {:httpoison, "~> 2.0"},
+  {:jason, "~> 1.4"},
+  {:qr_code, "~> 3.0"},
+  {:kino, "~> 0.14"}
+])
+
+network =
+  case System.get_env("LB_NETWORK", "test") do
+    "main" -> :main
+    "test" -> :test
+    other -> raise ArgumentError, "LB_NETWORK must be \"main\" or \"test\", got: #{inspect(other)}"
+  end
+
+if network == :main and System.get_env("LIVEWALLET_HOSTED") == "true" do
+  raise "This is a hosted LiveWallet. Mainnet is only for a Livebook you run yourself."
+end
+
+Application.put_env(:bsv, :network, network)
+```
+
+## Setup
+
+> Build and sign a transaction that cannot be mined until a block height you choose, so that you see how a transaction can carry a condition on time, not just on keys.
+
+Before this: [Send a Transaction](./send.livemd).
+You need a funded address, its index, and your seed phrase.
+
+```elixir
+network = BSV.network()
+woc = "https://api.whatsonchain.com/v1/bsv/#{network}"
+
+{label, hint} =
+  case network do
+    :main -> {"MAINNET", "Real bitcoin. Keep amounts under 1 USD."}
+    :test -> {"TESTNET", "Coins have no value. Addresses start with m or n, not 1."}
+  end
+
+Kino.Markdown.new("""
+> **Network: #{label}** (`#{network}`).
+> #{hint}
+> To switch, set the Livebook secret `LB_NETWORK` to `main` or `test`, then re-evaluate the setup cell.
+""")
+```
+
+## Two fields you have not used yet
+
+Every transaction has a `lock_time`.
+Every input has a `sequence`.
+When `lock_time` is set and at least one input's `sequence` is below the maximum, nodes treat the transaction as non-final until the chain reaches that height.
+Miners will not include it before then.
+A `lock_time` below 500,000,000 is a block height; at or above it is a unix time.
+This notebook uses a height; a time-based refund, the shape a marketplace escrow uses, is the same field with a bigger number.
+
+This is the idea behind a payment that is signed today but only becomes spendable next week, an order that a seller cannot collect until a delivery window, or a refund that only becomes valid if a counterparty goes silent.
+
+```mermaid
+flowchart LR
+  B[build tx with lock_time = H] --> S[sign]
+  S --> P{chain height >= H?}
+  P -->|no| W[nodes hold or reject as non-final]
+  P -->|yes| M[miners may include it]
+```
+
+## Inputs from you
+
+```elixir
+address_input = Kino.Input.text("Your funded address")
+index_input = Kino.Input.number("Its address index", default: 0)
+mnemonic_input = Kino.Input.password("Your seed phrase")
+target_input = Kino.Input.text("Address to pay")
+amount_input = Kino.Input.number("Satoshis to pay", default: 1000)
+blocks_input = Kino.Input.number("Blocks from now until it can be mined", default: 6)
+
+Kino.Layout.grid(
+  [address_input, index_input, mnemonic_input, target_input, amount_input, blocks_input],
+  columns: 1
+)
+```
+
+## Derive the key and find an output
+
+Same steps as in Send a Transaction, compressed.
+
+```elixir
+address = String.trim(Kino.Input.read(address_input))
+index = Kino.Input.read(index_input) || 0
+mnemonic = String.trim(Kino.Input.read(mnemonic_input))
+path = "m/44'/236'/0'/0/#{index}"
+
+keypair =
+  mnemonic
+  |> BSV.Mnemonic.to_seed()
+  |> BSV.ExtKey.from_seed!()
+  |> BSV.ExtKey.derive(path)
+
+derived = keypair.pubkey |> BSV.Address.from_pubkey() |> BSV.Address.to_string()
+
+if derived != address do
+  raise "The key at #{path} controls #{derived}, not #{address}"
+end
+
+%{status_code: 200, body: body} = HTTPoison.get!("#{woc}/address/#{address}/unspent")
+utxos = Jason.decode!(body)
+if utxos == [], do: raise("No unspent outputs at #{address}")
+
+%{"tx_hash" => utxo_txid, "tx_pos" => vout, "value" => value} = Enum.max_by(utxos, & &1["value"])
+
+%{status_code: 200, body: rawhex} = HTTPoison.get!("#{woc}/tx/#{utxo_txid}/hex")
+prev_out = BSV.Tx.from_binary!(rawhex, encoding: :hex).outputs |> Enum.at(vout)
+
+{:ok, utxo} =
+  BSV.UTXO.from_params(%{
+    "txid" => utxo_txid,
+    "vout" => vout,
+    "satoshis" => prev_out.satoshis,
+    "script" => BSV.Script.to_binary(prev_out.script, encoding: :hex)
+  })
+
+"Spending output #{vout} of #{utxo_txid}, worth #{value} satoshis"
+```
+
+## Pick the height
+
+```elixir
+%{status_code: 200, body: body} = HTTPoison.get!("#{woc}/chain/info")
+current_height = Jason.decode!(body)["blocks"]
+target_height = current_height + (Kino.Input.read(blocks_input) || 6)
+
+"Chain is at #{current_height}. This transaction will be valid from block #{target_height}."
+```
+
+## Build with a lock time
+
+The only differences from a plain payment are the `lock_time` on the builder and the `sequence: 0` on the input.
+Without the sequence change, nodes ignore `lock_time` entirely.
+
+```elixir
+{:ok, target_address} = BSV.Address.from_string(String.trim(Kino.Input.read(target_input)))
+amount = Kino.Input.read(amount_input) || 1000
+memo = "order lock until block #{target_height}"
+
+builder =
+  %BSV.TxBuilder{
+    lock_time: target_height,
+    inputs: [
+      BSV.Contract.P2PKH.unlock(utxo, %{keypair: keypair}, sequence: 0)
+    ],
+    outputs: [
+      BSV.Contract.P2PKH.lock(amount, %{address: target_address}),
+      BSV.Contract.OpReturn.lock(0, %{data: [memo]})
+    ]
+  }
+  |> BSV.TxBuilder.change_to(address)
+
+fee = BSV.TxBuilder.calc_required_fee(builder)
+if amount + fee > value, do: raise("#{amount} plus a fee of about #{fee} does not fit in #{value}")
+
+tx = BSV.TxBuilder.to_tx(builder)
+rawtx = BSV.Tx.to_binary(tx, encoding: :hex)
+txid = BSV.Tx.get_txid(tx)
+
+%{txid: txid, lock_time: tx.lock_time, sequence: hd(tx.inputs).sequence}
+```
+
+## Decode it back
+
+Anyone holding the raw hex can read the condition.
+Parse the bytes you just produced as if you had received them from a stranger.
+
+```elixir
+decoded = BSV.Tx.from_binary!(rawtx, encoding: :hex)
+
+%{
+  lock_time: decoded.lock_time,
+  inputs:
+    for i <- decoded.inputs do
+      %{sequence: i.sequence, unlocking_script_chunks: length(i.script.chunks)}
+    end,
+  outputs:
+    for o <- decoded.outputs do
+      %{satoshis: o.satoshis, script: inspect(o.script.chunks, limit: 4)}
+    end
+}
+```
+
+## Try to broadcast it now
+
+Set `try_broadcast` to `true` to see what the network says about a transaction that is not yet final.
+Some nodes hold non-final transactions for a while; others reject them.
+Either way, it will not be mined before block `#{target_height}`.
+
+```elixir
+try_broadcast = false
+
+if try_broadcast do
+  case HTTPoison.post!("#{woc}/tx/raw", Jason.encode!(%{txhex: rawtx}), [
+         {"content-type", "application/json"}
+       ]) do
+    %{status_code: 200, body: body} -> "Accepted into a non-final pool: #{String.trim(body, "\"")}"
+    %{status_code: code, body: body} -> "Rejected (#{code}): #{body}"
+  end
+else
+  "Not broadcast. Set try_broadcast = true to try, or keep the raw hex and broadcast it after block #{target_height}."
+end
+```
+
+Keep `rawtx`.
+Once the chain passes the target height, broadcasting it works exactly like a normal payment.
+Notice that you could hand this hex to someone else now, and they could hold it until the height arrives; you signed it, so its content cannot change.
+
+## Review
+
+You built a payment that carries a time condition, signed it, and read the condition back out of the raw bytes.
+
+```elixir
+checks = [
+  {"lock_time is the target height", decoded.lock_time == target_height},
+  {"the input's sequence is below the maximum so lock_time applies", hd(decoded.inputs).sequence < 0xFFFFFFFF},
+  {"target height is in the future", target_height > current_height},
+  {"decoding the raw hex gives the same txid", BSV.Tx.get_txid(decoded) == txid}
+]
+
+Enum.each(checks, fn {label, ok?} -> IO.puts("#{if ok?, do: "ok  ", else: "FAIL"}  #{label}") end)
+failed = for {label, false} <- checks, do: label
+if failed == [], do: "PASS", else: raise("FAIL: " <> Enum.join(failed, "; "))
+```
+
+## Next
+
+* [Multisig Ceremony](../governance/multisig-ceremony.livemd): a condition on keys instead of time.
+* Back to the [map](../start-here.livemd).
+
+Stuck or have a question? [Open an issue](https://github.com/afomi/livewallet/issues/new).
